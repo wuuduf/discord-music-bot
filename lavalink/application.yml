@@ -36,9 +36,15 @@ plugins:
     allowDirectPlaylistIds: true
     clients:
       - MUSIC
+      - TV
       - WEB
       - WEBEMBEDDED
       - TVHTML5_SIMPLY
+    oauth:
+      enabled: true
+      # 第一次启动不要填 refreshToken；Lavalink 会在日志里输出 OAuth 授权 URL 和 code。
+      # 授权成功后，再把日志里的 refreshToken 填到这里并重启 Lavalink：
+      # refreshToken: "paste your refresh token here"
 
 metrics:
   prometheus:
@@ -49,3 +55,4 @@ logging:
   level:
     root: INFO
     lavalink: INFO
+    dev.lavalink.youtube.http.YoutubeOauth2Handler: INFO

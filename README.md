@@ -172,13 +172,52 @@ lavalink/application.yml
 
 当前配置使用 Lavalink v4 + `dev.lavalink.youtube:youtube-plugin:1.18.0`，并禁用 Lavalink 内置 YouTube source，改用 YouTube Source 插件。
 
-如果 YouTube 解析失败，优先检查：
+默认已经启用 YouTube OAuth：
+
+```yaml
+plugins:
+  youtube:
+    clients:
+      - MUSIC
+      - TV
+      - WEB
+      - WEBEMBEDDED
+      - TVHTML5_SIMPLY
+    oauth:
+      enabled: true
+```
+
+首次部署或重启 Lavalink 后，如果 YouTube 要求登录，查看日志：
 
 ```bash
 docker compose logs -f lavalink
 ```
 
-常见原因是 YouTube 风控、区域限制或插件版本需要更新。
+日志里会出现 OAuth 授权 URL 和 code。用浏览器打开 URL、输入 code 并授权。授权成功后，日志通常会输出 `refreshToken`。不要公开这个 token。
+
+然后编辑：
+
+```bash
+nano lavalink/application.yml
+```
+
+把 token 填进注释位置：
+
+```yaml
+plugins:
+  youtube:
+    oauth:
+      enabled: true
+      refreshToken: "paste your refresh token here"
+```
+
+最后重启：
+
+```bash
+docker compose restart lavalink discord-music-bot
+```
+
+如果仍失败，优先看 Lavalink 日志中的 YouTube 报错。常见原因是 YouTube 风控、区域限制、插件版本需要更新，或该账号/网络被 YouTube 限制。
 
 ## 路线图
 
