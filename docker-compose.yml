@@ -1,0 +1,26 @@
+services:
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:latest
+    restart: unless-stopped
+    environment:
+      LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:-youshallnotpass}
+    volumes:
+      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
+
+  discord-music-bot:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - lavalink
+    env_file:
+      - .env
+    environment:
+      STORAGE_PATH: /app/runtime/bot.sqlite
+      AUDIO_BACKEND: ${AUDIO_BACKEND:-lavalink}
+      LAVALINK_HOST: ${LAVALINK_HOST:-lavalink}
+      LAVALINK_PORT: ${LAVALINK_PORT:-2333}
+      LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:-youshallnotpass}
+      LAVALINK_SECURE: ${LAVALINK_SECURE:-false}
+      LAVALINK_SEARCH_SOURCE: ${LAVALINK_SEARCH_SOURCE:-ytmsearch}
+    volumes:
+      - ./runtime:/app/runtime
