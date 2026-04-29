@@ -7,7 +7,7 @@
 - 注册 Discord Slash Commands
 - `/ping`
 - `/play query:<链接或关键词>`：加入用户所在语音频道并播放
-  - `AUDIO_BACKEND=lavalink`：通过 Lavalink 搜索/播放，默认 `ytmsearch`
+  - `AUDIO_BACKEND=lavalink`：通过 Lavalink 搜索/播放，默认 `ytmsearch`，YouTube 播放失败时自动 fallback 到 `scsearch`
   - `AUDIO_BACKEND=builtin`：使用内置 `@discordjs/voice` 播放直接音频 URL 或 iTunes 预览
 - `/search query:<关键词>`：搜索 Apple Music/iTunes 预览，返回 Select Menu，点击后加入队列播放
 - `/queue`、`/nowplaying`
@@ -82,6 +82,7 @@ LAVALINK_PORT=2333
 LAVALINK_PASSWORD=youshallnotpass
 LAVALINK_SECURE=false
 LAVALINK_SEARCH_SOURCE=ytmsearch
+LAVALINK_FALLBACK_SEARCH_SOURCE=scsearch
 
 ITUNES_COUNTRY=us
 STORAGE_PATH=runtime/bot.sqlite
@@ -218,6 +219,28 @@ docker compose restart lavalink discord-music-bot
 ```
 
 如果仍失败，优先看 Lavalink 日志中的 YouTube 报错。常见原因是 YouTube 风控、区域限制、插件版本需要更新，或该账号/网络被 YouTube 限制。
+
+
+### YouTube 失败自动 fallback
+
+默认配置：
+
+```env
+LAVALINK_SEARCH_SOURCE=ytmsearch
+LAVALINK_FALLBACK_SEARCH_SOURCE=scsearch
+```
+
+含义：`/play` 优先使用 YouTube Music；如果 YouTube 搜到了但播放流被 `This video requires login` / `Sign in to confirm you’re not a bot` 拦截，Bot 会自动搜索 SoundCloud，并在文字频道提示：
+
+```text
+YouTube 播放失败，已自动切到 SoundCloud：...
+```
+
+如果你只想硬用 YouTube，不想 fallback，可以把 `LAVALINK_FALLBACK_SEARCH_SOURCE` 改成与主搜索源相同，例如：
+
+```env
+LAVALINK_FALLBACK_SEARCH_SOURCE=ytmsearch
+```
 
 ## 路线图
 

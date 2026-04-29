@@ -10,6 +10,7 @@ export type LavalinkServiceConfig = {
   password: string;
   secure: boolean;
   searchSource: SearchPlatform;
+  fallbackSearchSource?: SearchPlatform;
 };
 
 export type LavalinkPlayResult = {
@@ -18,8 +19,23 @@ export type LavalinkPlayResult = {
   playlistName?: string;
 };
 
+type PlaybackFallbackContext = {
+  originalQuery: string;
+  fallbackQuery: string;
+  primarySource: string;
+  fallbackSource: SearchPlatform;
+  textChannelId: string;
+  requester: unknown;
+  createdAt: number;
+  attempted: boolean;
+};
+
+const fallbackContextTtlMs = 30 * 60 * 1000;
+
 export class LavalinkService {
   readonly manager?: LavalinkManager;
+  private readonly fallbackByTrackKey = new Map<string, PlaybackFallbackContext>();
+  private readonly fallbackInFlightGuilds = new Set<string>();
 
   constructor(
     private readonly client: Client,
@@ -60,6 +76,15 @@ export class LavalinkService {
     this.manager.nodeManager.on('connect', node => this.logger.info({ node: node.id }, 'lavalink node connected'));
     this.manager.nodeManager.on('disconnect', (node, reason) => this.logger.warn({ node: node.id, reason }, 'lavalink node disconnected'));
     this.manager.nodeManager.on('error', (node, error) => this.logger.error({ node: node.id, err: error }, 'lavalink node error'));
+    this.manager.on('trackError', (player, track, payload) => {
+      void this.handlePlaybackFailure(player as any, track as any, payload, 'trackError');
+    });
+    this.manager.on('trackStuck', (player, track, payload) => {
+      void this.handlePlaybackFailure(player as any, track as any, payload, 'trackStuck');
+    });
+    this.manager.on('trackEnd', (_player, track, payload) => {
+      if (payload.reason !== 'loadFailed') this.deleteFallbackContext(track as any);
+    });
   }
 
   get enabled(): boolean {
@@ -83,9 +108,11 @@ export class LavalinkService {
     const player = this.getOrCreatePlayer(voiceChannel, textChannelId);
     await player.connect();
 
-    const searchQuery = isHttpUrl(query)
+    const directUrl = isHttpUrl(query);
+    const primarySource = directUrl ? undefined : this.config.searchSource;
+    const searchQuery = directUrl
       ? { query }
-      : { query, source: this.config.searchSource };
+      : { query, source: primarySource };
     const result = await player.search(searchQuery, requester, false) as any;
     const tracks = Array.isArray(result.tracks) ? result.tracks : [];
     if (tracks.length === 0) {
@@ -93,6 +120,16 @@ export class LavalinkService {
     }
 
     const toAdd = result.loadType === 'playlist' ? tracks : [tracks[0]];
+    if (!directUrl && primarySource && this.shouldFallbackFrom(primarySource)) {
+      this.registerFallbackContexts(toAdd, {
+        originalQuery: query,
+        primarySource: String(primarySource),
+        fallbackSource: this.config.fallbackSearchSource ?? 'scsearch',
+        textChannelId,
+        requester
+      });
+    }
+
     await player.queue.add(toAdd);
     if (!player.playing && !player.paused) {
       await player.play();
@@ -196,7 +233,8 @@ export class LavalinkService {
       `paused: ${player?.paused ? 'yes' : 'no'}`,
       `queued: ${player?.queue.tracks.length ?? 0}`,
       `volume: ${player?.volume ?? 'n/a'}%`,
-      `repeat: ${player ? fromLavalinkRepeatMode(player.repeatMode) : 'off'}`
+      `repeat: ${player ? fromLavalinkRepeatMode(player.repeatMode) : 'off'}`,
+      `fallback: ${this.config.fallbackSearchSource ? `${this.config.searchSource}->${this.config.fallbackSearchSource}` : 'disabled'}`
     ];
   }
 
@@ -211,6 +249,102 @@ export class LavalinkService {
       volume: 80
     });
   }
+
+  private shouldFallbackFrom(source: SearchPlatform): boolean {
+    const primary = String(source).toLowerCase();
+    const fallback = String(this.config.fallbackSearchSource ?? '').toLowerCase();
+    if (!fallback || fallback === primary) return false;
+    return primary.startsWith('yt') || primary.includes('youtube');
+  }
+
+  private registerFallbackContexts(
+    tracks: any[],
+    input: Omit<PlaybackFallbackContext, 'fallbackQuery' | 'createdAt' | 'attempted'>
+  ): void {
+    this.gcFallbackContexts();
+    for (const track of tracks) {
+      const key = trackKey(track);
+      if (!key) continue;
+      this.fallbackByTrackKey.set(key, {
+        ...input,
+        fallbackQuery: buildFallbackQuery(track, input.originalQuery),
+        createdAt: Date.now(),
+        attempted: false
+      });
+    }
+  }
+
+  private getFallbackContext(track: any): PlaybackFallbackContext | undefined {
+    const key = trackKey(track);
+    return key ? this.fallbackByTrackKey.get(key) : undefined;
+  }
+
+  private deleteFallbackContext(track: any): void {
+    const key = trackKey(track);
+    if (key) this.fallbackByTrackKey.delete(key);
+  }
+
+  private async handlePlaybackFailure(player: any, track: any, payload: unknown, eventName: 'trackError' | 'trackStuck'): Promise<void> {
+    const context = this.getFallbackContext(track);
+    if (!context || context.attempted) {
+      this.logger.warn({ guildId: player.guildId, track: track ? formatTrack(track) : undefined, payload, eventName }, 'lavalink playback failed without fallback');
+      return;
+    }
+
+    context.attempted = true;
+    this.deleteFallbackContext(track);
+
+    if (this.fallbackInFlightGuilds.has(player.guildId)) {
+      this.logger.warn({ guildId: player.guildId, originalQuery: context.originalQuery }, 'fallback already in flight for guild');
+      return;
+    }
+
+    this.fallbackInFlightGuilds.add(player.guildId);
+    try {
+      const result = await player.search({ query: context.fallbackQuery, source: context.fallbackSource }, context.requester, false) as any;
+      const tracks = Array.isArray(result.tracks) ? result.tracks : [];
+      const fallbackTrack = tracks[0];
+      if (!fallbackTrack) {
+        this.logger.error({ guildId: player.guildId, originalQuery: context.originalQuery, fallbackQuery: context.fallbackQuery, fallbackSource: context.fallbackSource }, 'fallback search returned no tracks');
+        await this.sendTextChannelMessage(context.textChannelId, `YouTube 播放失败，SoundCloud 也没有找到可播放结果：**${escapeMarkdownLite(context.originalQuery)}**`);
+        return;
+      }
+
+      await player.play({ clientTrack: fallbackTrack });
+      const title = formatTrack(fallbackTrack);
+      this.logger.warn({
+        guildId: player.guildId,
+        originalQuery: context.originalQuery,
+        fallbackQuery: context.fallbackQuery,
+        fallbackSource: context.fallbackSource,
+        title,
+        eventName
+      }, 'youtube playback failed; switched to fallback source');
+      await this.sendTextChannelMessage(context.textChannelId, `YouTube 播放失败，已自动切到 SoundCloud：**${escapeMarkdownLite(title)}**`);
+    } catch (error) {
+      this.logger.error({ err: error, guildId: player.guildId, originalQuery: context.originalQuery, fallbackSource: context.fallbackSource }, 'fallback playback failed');
+      await this.sendTextChannelMessage(context.textChannelId, `YouTube 播放失败，自动切换 SoundCloud 也失败了：**${escapeMarkdownLite(context.originalQuery)}**`);
+    } finally {
+      this.fallbackInFlightGuilds.delete(player.guildId);
+    }
+  }
+
+  private async sendTextChannelMessage(textChannelId: string, message: string): Promise<void> {
+    const channel = await this.client.channels.fetch(textChannelId).catch(() => undefined) as any;
+    if (!channel || typeof channel.send !== 'function') return;
+    await channel.send(message).catch((error: unknown) => {
+      this.logger.warn({ err: error, textChannelId }, 'failed to send fallback notification');
+    });
+  }
+
+  private gcFallbackContexts(): void {
+    const now = Date.now();
+    for (const [key, context] of this.fallbackByTrackKey) {
+      if (now - context.createdAt > fallbackContextTtlMs) {
+        this.fallbackByTrackKey.delete(key);
+      }
+    }
+  }
 }
 
 function toLavalinkRepeatMode(mode: RepeatMode): LavalinkRepeatMode {
@@ -223,6 +357,22 @@ function fromLavalinkRepeatMode(mode: LavalinkRepeatMode): RepeatMode {
   if (mode === 'track') return 'one';
   if (mode === 'queue') return 'all';
   return 'off';
+}
+
+function trackKey(track: Track | any): string | undefined {
+  if (!track) return undefined;
+  if (track.encoded) return `encoded:${track.encoded}`;
+  const info = track.info ?? {};
+  if (info.sourceName && info.identifier) return `${info.sourceName}:${info.identifier}`;
+  if (info.title) return `${info.sourceName ?? 'unknown'}:${info.author ?? ''}:${info.title}`;
+  return undefined;
+}
+
+function buildFallbackQuery(track: Track | any, originalQuery: string): string {
+  const info = track?.info ?? {};
+  const title = typeof info.title === 'string' ? info.title : '';
+  const author = typeof info.author === 'string' ? info.author : '';
+  return [author, title].filter(Boolean).join(' ').trim() || originalQuery;
 }
 
 function formatTrack(track: Track | any): string {

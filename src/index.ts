@@ -40,7 +40,8 @@ const lavalinkService = new LavalinkService(client, {
   port: env.LAVALINK_PORT,
   password: env.LAVALINK_PASSWORD,
   secure: env.LAVALINK_SECURE,
-  searchSource: env.LAVALINK_SEARCH_SOURCE as SearchPlatform
+  searchSource: env.LAVALINK_SEARCH_SOURCE as SearchPlatform,
+  fallbackSearchSource: env.LAVALINK_FALLBACK_SEARCH_SOURCE as SearchPlatform
 }, logger);
 const router = new InteractionRouter(queueManager, playerManager, guessGameManager, sourceResolver, logger, {
   userCooldownMs: env.USER_COOLDOWN_MS

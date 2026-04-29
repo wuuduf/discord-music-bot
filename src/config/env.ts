@@ -22,6 +22,7 @@ const envSchema = z.object({
   LAVALINK_PASSWORD: z.string().min(1).default('youshallnotpass'),
   LAVALINK_SECURE: booleanFromEnv.default(false),
   LAVALINK_SEARCH_SOURCE: z.string().min(1).default('ytmsearch'),
+  LAVALINK_FALLBACK_SEARCH_SOURCE: z.string().min(1).default('scsearch'),
   ITUNES_COUNTRY: z.string().min(2).max(2).default('us'),
   STORAGE_PATH: z.string().min(1).default('runtime/bot.sqlite'),
   MAX_QUEUE_SIZE: z.coerce.number().int().min(1).max(500).default(50),

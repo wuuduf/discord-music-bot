@@ -22,5 +22,6 @@ services:
       LAVALINK_PASSWORD: ${LAVALINK_PASSWORD:-youshallnotpass}
       LAVALINK_SECURE: ${LAVALINK_SECURE:-false}
       LAVALINK_SEARCH_SOURCE: ${LAVALINK_SEARCH_SOURCE:-ytmsearch}
+      LAVALINK_FALLBACK_SEARCH_SOURCE: ${LAVALINK_FALLBACK_SEARCH_SOURCE:-scsearch}
     volumes:
       - ./runtime:/app/runtime
