@@ -17,6 +17,7 @@ export type LavalinkServiceConfig = {
 export type LavalinkPlayResult = {
   title: string;
   added: number;
+  source: string;
   playlistName?: string;
 };
 
@@ -151,6 +152,7 @@ export class LavalinkService {
     return {
       title: formatTrack(toAdd[0]),
       added: toAdd.length,
+      source: directUrl ? 'direct-url' : String(primarySource),
       playlistName: result.playlist?.title ?? result.playlist?.name
     };
   }
@@ -301,7 +303,7 @@ export class LavalinkService {
         cachedPath: resolved.cachedPath,
         title
       }, 'queued yt-dlp primary track request');
-      return { title, added: 1 };
+      return { title, added: 1, source: `yt-dlp-${resolved.mode}` };
     } catch (error) {
       this.logger.warn({ err: error, guildId: player.guildId, query }, 'yt-dlp primary playback failed; falling back to lavalink search');
       return undefined;

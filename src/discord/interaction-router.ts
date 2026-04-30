@@ -3,6 +3,7 @@ import type { ChatInputCommandInteraction, StringSelectMenuInteraction } from 'd
 import {
   ActionRowBuilder,
   inlineCode,
+  MessageFlags,
   PermissionFlagsBits,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder
@@ -47,7 +48,7 @@ export class InteractionRouter {
   async handleChatInput(interaction: ChatInputCommandInteraction): Promise<void> {
     switch (interaction.commandName) {
       case 'ping':
-        await interaction.reply({ content: `pong ${inlineCode(`${interaction.client.ws.ping}ms`)}`, ephemeral: true });
+        await interaction.reply({ content: `pong ${inlineCode(`${interaction.client.ws.ping}ms`)}`, flags: MessageFlags.Ephemeral });
         return;
       case 'play':
         await this.handlePlay(interaction);
@@ -98,13 +99,13 @@ export class InteractionRouter {
         await this.handleHealth(interaction);
         return;
       default:
-        await interaction.reply({ content: '未知命令。', ephemeral: true });
+        await interaction.reply({ content: '未知命令。', flags: MessageFlags.Ephemeral });
     }
   }
 
   private async handlePlay(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) {
-      await interaction.reply({ content: '请在服务器内使用 /play。', ephemeral: true });
+      await interaction.reply({ content: '请在服务器内使用 /play。', flags: MessageFlags.Ephemeral });
       return;
     }
     if (await this.rejectIfCoolingDown(interaction, 'enqueue')) return;
@@ -113,12 +114,12 @@ export class InteractionRouter {
     const member = await interaction.guild?.members.fetch(interaction.user.id);
     const voiceChannel = member?.voice.channel;
     if (!voiceChannel) {
-      await interaction.reply({ content: '请先加入一个语音频道，再使用 /play。', ephemeral: true });
+      await interaction.reply({ content: '请先加入一个语音频道，再使用 /play。', flags: MessageFlags.Ephemeral });
       return;
     }
 
     if (!voiceChannel.joinable) {
-      await interaction.reply({ content: '我没有加入该语音频道的权限。', ephemeral: true });
+      await interaction.reply({ content: '我没有加入该语音频道的权限。', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -130,7 +131,7 @@ export class InteractionRouter {
           id: interaction.user.id,
           username: interaction.user.username
         });
-        this.logger.info({ guildId: interaction.guildId, query, added: result.added }, 'queued lavalink track request');
+        this.logger.info({ guildId: interaction.guildId, query, added: result.added, source: result.source, title: result.title }, 'queued audio track request');
         await interaction.editReply(formatLavalinkPlayResult(result));
       } catch (error) {
         this.logger.error({ err: error, guildId: interaction.guildId, query }, 'lavalink play failed');
@@ -165,7 +166,7 @@ export class InteractionRouter {
 
   private async handleSearch(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) {
-      await interaction.reply({ content: '请在服务器内使用 /search。', ephemeral: true });
+      await interaction.reply({ content: '请在服务器内使用 /search。', flags: MessageFlags.Ephemeral });
       return;
     }
     if (await this.rejectIfCoolingDown(interaction, 'search')) return;
@@ -212,17 +213,17 @@ export class InteractionRouter {
     const pending = this.pendingSearches.get(id);
     if (!pending || Date.now() - pending.createdAt > pendingSearchTTL) {
       this.pendingSearches.delete(id);
-      await interaction.reply({ content: '这个搜索结果已经过期，请重新使用 /search。', ephemeral: true });
+      await interaction.reply({ content: '这个搜索结果已经过期，请重新使用 /search。', flags: MessageFlags.Ephemeral });
       return;
     }
 
     if (interaction.user.id !== pending.requestedBy) {
-      await interaction.reply({ content: '只有发起这次搜索的用户可以选择结果。', ephemeral: true });
+      await interaction.reply({ content: '只有发起这次搜索的用户可以选择结果。', flags: MessageFlags.Ephemeral });
       return;
     }
 
     if (!interaction.guildId || interaction.guildId !== pending.guildId) {
-      await interaction.reply({ content: '搜索结果不属于当前服务器。', ephemeral: true });
+      await interaction.reply({ content: '搜索结果不属于当前服务器。', flags: MessageFlags.Ephemeral });
       return;
     }
     if (await this.rejectSelectIfCoolingDown(interaction, 'enqueue')) return;
@@ -230,18 +231,18 @@ export class InteractionRouter {
     const index = Number(interaction.values[0]);
     const track = pending.results[index];
     if (!Number.isInteger(index) || !track) {
-      await interaction.reply({ content: '无效的搜索结果。', ephemeral: true });
+      await interaction.reply({ content: '无效的搜索结果。', flags: MessageFlags.Ephemeral });
       return;
     }
 
     const member = await interaction.guild?.members.fetch(interaction.user.id);
     const voiceChannel = member?.voice.channel;
     if (!voiceChannel) {
-      await interaction.reply({ content: '请先加入一个语音频道，再选择曲目。', ephemeral: true });
+      await interaction.reply({ content: '请先加入一个语音频道，再选择曲目。', flags: MessageFlags.Ephemeral });
       return;
     }
     if (!voiceChannel.joinable) {
-      await interaction.reply({ content: '我没有加入该语音频道的权限。', ephemeral: true });
+      await interaction.reply({ content: '我没有加入该语音频道的权限。', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -279,7 +280,7 @@ export class InteractionRouter {
         track
       });
     } catch (error) {
-      await interaction.reply({ content: formatEnqueueError(error), ephemeral: true });
+      await interaction.reply({ content: formatEnqueueError(error), flags: MessageFlags.Ephemeral });
       return;
     }
     await this.playerManager.ensurePlaying(voiceChannel, pending.textChannelId);
@@ -293,7 +294,7 @@ export class InteractionRouter {
 
   private async handleQueue(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) {
-      await interaction.reply({ content: '请在服务器内使用 /queue。', ephemeral: true });
+      await interaction.reply({ content: '请在服务器内使用 /queue。', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -315,7 +316,7 @@ export class InteractionRouter {
 
   private async handleNowPlaying(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) {
-      await interaction.reply({ content: '请在服务器内使用 /nowplaying。', ephemeral: true });
+      await interaction.reply({ content: '请在服务器内使用 /nowplaying。', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -452,11 +453,11 @@ export class InteractionRouter {
 
   private async handleDjRole(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) {
-      await interaction.reply({ content: '请在服务器内使用 /djrole。', ephemeral: true });
+      await interaction.reply({ content: '请在服务器内使用 /djrole。', flags: MessageFlags.Ephemeral });
       return;
     }
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-      await interaction.reply({ content: '只有拥有 Manage Server 权限的成员可以设置 DJ role。', ephemeral: true });
+      await interaction.reply({ content: '只有拥有 Manage Server 权限的成员可以设置 DJ role。', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -488,7 +489,7 @@ export class InteractionRouter {
         await this.handleGuessStop(interaction);
         return;
       default:
-        await interaction.reply({ content: '未知猜歌子命令。', ephemeral: true });
+        await interaction.reply({ content: '未知猜歌子命令。', flags: MessageFlags.Ephemeral });
     }
   }
 
@@ -498,18 +499,18 @@ export class InteractionRouter {
 
     const guildId = interaction.guildId!;
     if (this.guessGameManager.hasActiveRound(guildId)) {
-      await interaction.reply({ content: '当前服务器已经有一轮猜歌正在进行。可以先使用 /guess answer、/guess reveal 或 /guess stop。', ephemeral: true });
+      await interaction.reply({ content: '当前服务器已经有一轮猜歌正在进行。可以先使用 /guess answer、/guess reveal 或 /guess stop。', flags: MessageFlags.Ephemeral });
       return;
     }
 
     const member = await interaction.guild?.members.fetch(interaction.user.id);
     const voiceChannel = member?.voice.channel;
     if (!voiceChannel) {
-      await interaction.reply({ content: '请先加入一个语音频道，再开始猜歌。', ephemeral: true });
+      await interaction.reply({ content: '请先加入一个语音频道，再开始猜歌。', flags: MessageFlags.Ephemeral });
       return;
     }
     if (!voiceChannel.joinable) {
-      await interaction.reply({ content: '我没有加入该语音频道的权限。', ephemeral: true });
+      await interaction.reply({ content: '我没有加入该语音频道的权限。', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -579,7 +580,7 @@ export class InteractionRouter {
 
   private async handleGuessAnswer(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) {
-      await interaction.reply({ content: '请在服务器内使用 /guess answer。', ephemeral: true });
+      await interaction.reply({ content: '请在服务器内使用 /guess answer。', flags: MessageFlags.Ephemeral });
       return;
     }
     const text = interaction.options.getString('text', true).trim();
@@ -594,24 +595,24 @@ export class InteractionRouter {
       return;
     }
     if (result.reason === 'no_round') {
-      await interaction.reply({ content: '当前没有进行中的猜歌回合。', ephemeral: true });
+      await interaction.reply({ content: '当前没有进行中的猜歌回合。', flags: MessageFlags.Ephemeral });
       return;
     }
-    await interaction.reply({ content: `不对，再试试！已猜次数：${result.round?.answerCount ?? 0}`, ephemeral: true });
+    await interaction.reply({ content: `不对，再试试！已猜次数：${result.round?.answerCount ?? 0}`, flags: MessageFlags.Ephemeral });
   }
 
   private async handleGuessHint(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) {
-      await interaction.reply({ content: '请在服务器内使用 /guess hint。', ephemeral: true });
+      await interaction.reply({ content: '请在服务器内使用 /guess hint。', flags: MessageFlags.Ephemeral });
       return;
     }
     const hint = this.guessGameManager.buildHint(interaction.guildId);
-    await interaction.reply(hint ? `💡 **提示**\n${hint}` : { content: '当前没有进行中的猜歌回合。', ephemeral: true });
+    await interaction.reply(hint ? `💡 **提示**\n${hint}` : { content: '当前没有进行中的猜歌回合。', flags: MessageFlags.Ephemeral });
   }
 
   private async handleGuessStatus(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) {
-      await interaction.reply({ content: '请在服务器内使用 /guess status。', ephemeral: true });
+      await interaction.reply({ content: '请在服务器内使用 /guess status。', flags: MessageFlags.Ephemeral });
       return;
     }
     const round = this.guessGameManager.getRound(interaction.guildId);
@@ -632,7 +633,7 @@ export class InteractionRouter {
     if (!(await this.requireGuildAndDj(interaction, '/guess reveal'))) return;
     const round = this.guessGameManager.stopRound(interaction.guildId!);
     if (!round) {
-      await interaction.reply({ content: '当前没有进行中的猜歌回合。', ephemeral: true });
+      await interaction.reply({ content: '当前没有进行中的猜歌回合。', flags: MessageFlags.Ephemeral });
       return;
     }
     if (this.useLavalink()) {
@@ -656,7 +657,7 @@ export class InteractionRouter {
 
   private async handleHealth(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.guildId) {
-      await interaction.reply({ content: '请在服务器内使用 /health。', ephemeral: true });
+      await interaction.reply({ content: '请在服务器内使用 /health。', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -668,7 +669,7 @@ export class InteractionRouter {
           `dj_role: ${stats.djRoleId ? `<@&${stats.djRoleId}>` : 'none'}`,
           `cooldown: ${this.options.userCooldownMs}ms`
         ].join('\n'),
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -686,7 +687,7 @@ export class InteractionRouter {
         `dj_role: ${stats.djRoleId ? `<@&${stats.djRoleId}>` : 'none'}`,
         `cooldown: ${this.options.userCooldownMs}ms`
       ].join('\n'),
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -714,7 +715,7 @@ export class InteractionRouter {
 
   private async requireGuildAndDj(interaction: ChatInputCommandInteraction, commandName: string): Promise<boolean> {
     if (!interaction.guildId) {
-      await interaction.reply({ content: `请在服务器内使用 ${commandName}。`, ephemeral: true });
+      await interaction.reply({ content: `请在服务器内使用 ${commandName}。`, flags: MessageFlags.Ephemeral });
       return false;
     }
     if (await this.hasDjPermission(interaction)) {
@@ -723,7 +724,7 @@ export class InteractionRouter {
     const stats = this.queueManager.stats(interaction.guildId);
     await interaction.reply({
       content: `需要 DJ role ${stats.djRoleId ? `<@&${stats.djRoleId}>` : ''} 或 Manage Server 权限才能执行该操作。`,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return false;
   }
@@ -762,7 +763,7 @@ export class InteractionRouter {
     if (remainingMs <= 0) return false;
     await interaction.reply({
       content: `操作太快了，请 ${Math.ceil(remainingMs / 1000)} 秒后再试。`,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return true;
   }
@@ -772,7 +773,7 @@ export class InteractionRouter {
     if (remainingMs <= 0) return false;
     await interaction.reply({
       content: `操作太快了，请 ${Math.ceil(remainingMs / 1000)} 秒后再试。`,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return true;
   }

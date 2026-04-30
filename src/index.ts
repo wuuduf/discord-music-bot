@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits } from 'discord.js';
+import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
 import type { SearchPlatform } from 'lavalink-client';
 import { loadEnv } from './config/env.js';
 import { InteractionRouter } from './discord/interaction-router.js';
@@ -95,9 +95,9 @@ client.on(Events.InteractionCreate, async interaction => {
     logger.error({ err: error, interactionId: interaction.id }, 'interaction failed');
     const message = '命令执行失败，错误已记录。';
     if (interaction.deferred || interaction.replied) {
-      await interaction.followUp({ content: message, ephemeral: true }).catch(() => undefined);
+      await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
     } else {
-      await interaction.reply({ content: message, ephemeral: true }).catch(() => undefined);
+      await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => undefined);
     }
   }
 });
