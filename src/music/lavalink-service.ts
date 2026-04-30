@@ -316,7 +316,7 @@ export class LavalinkService {
     const track = tracks[0];
     if (!track) throw new Error('Lavalink could not load yt-dlp media URL');
     const loadedTitle = formatTrack(track);
-    const title = loadedTitle === 'Unknown Track' ? resolved.title : loadedTitle;
+    const title = isUnknownTrackTitle(loadedTitle) ? resolved.title : loadedTitle;
     return { resolved, track, title };
   }
 
@@ -544,6 +544,14 @@ function formatTrack(track: Track | any): string {
   const title = info.title ?? 'Unknown Track';
   const author = info.author;
   return author ? `${author} - ${title}` : title;
+}
+
+function isUnknownTrackTitle(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'unknown track'
+    || normalized === 'unknown title'
+    || normalized === 'unknown artist - unknown title'
+    || normalized === 'unknown author - unknown track';
 }
 
 function searchSourceLabel(source: SearchPlatform): string {

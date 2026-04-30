@@ -116,18 +116,24 @@ export class YtDlpService {
 
   private async resolveDirect(query: string): Promise<YtDlpResolveResult> {
     const target = buildSearchTarget(query);
+    const metadata = await this.fetchMetadata(target).catch(error => {
+      this.logger.warn({ err: error, query }, 'yt-dlp metadata extraction failed; continuing with direct URL only');
+      return undefined;
+    });
+    const mediaTarget = metadata?.webpage_url ?? target;
     const { stdout } = await this.runYtDlp([
       ...this.baseArgs(),
       '-f', this.config.format,
       '-g',
-      target
+      mediaTarget
     ]);
     const playUrl = stdout.split('\n').map(line => line.trim()).find(Boolean);
     if (!playUrl) throw new Error('yt-dlp returned no direct media URL');
     return {
-      title: `yt-dlp: ${query}`,
+      title: metadata?.title ?? `yt-dlp: ${query}`,
       playUrl,
-      mode: 'direct'
+      mode: 'direct',
+      videoId: metadata?.id
     };
   }
 
