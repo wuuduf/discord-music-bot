@@ -116,24 +116,26 @@ export class YtDlpService {
 
   private async resolveDirect(query: string): Promise<YtDlpResolveResult> {
     const target = buildSearchTarget(query);
-    const metadata = await this.fetchMetadata(target).catch(error => {
-      this.logger.warn({ err: error, query }, 'yt-dlp metadata extraction failed; continuing with direct URL only');
-      return undefined;
-    });
-    const mediaTarget = metadata?.webpage_url ?? target;
     const { stdout } = await this.runYtDlp([
       ...this.baseArgs(),
       '-f', this.config.format,
+      '--get-title',
+      '--get-id',
       '-g',
-      mediaTarget
+      target
     ]);
-    const playUrl = stdout.split('\n').map(line => line.trim()).find(Boolean);
+    const lines = stdout.split('\n').map(line => line.trim()).filter(Boolean);
+    const playUrlIndex = lines.findIndex(isHttpUrl);
+    const playUrl = playUrlIndex >= 0 ? lines[playUrlIndex] : undefined;
     if (!playUrl) throw new Error('yt-dlp returned no direct media URL');
+
+    const title = lines.find((line, index) => index !== playUrlIndex && !isLikelyYoutubeId(line)) ?? `yt-dlp: ${query}`;
+    const videoId = lines.find((line, index) => index !== playUrlIndex && isLikelyYoutubeId(line));
     return {
-      title: metadata?.title ?? `yt-dlp: ${query}`,
+      title,
       playUrl,
       mode: 'direct',
-      videoId: metadata?.id
+      videoId
     };
   }
 
@@ -543,6 +545,10 @@ function contentTypeFor(filePath: string): string {
   if (ext === '.ogg') return 'audio/ogg';
   if (ext === '.flac') return 'audio/flac';
   return 'application/octet-stream';
+}
+
+function isLikelyYoutubeId(value: string): boolean {
+  return /^[A-Za-z0-9_-]{11}$/.test(value);
 }
 
 function isHttpUrl(value: string): boolean {
