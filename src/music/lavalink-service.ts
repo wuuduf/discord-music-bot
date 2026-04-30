@@ -29,6 +29,7 @@ type PlaybackFallbackContext = {
   requester: unknown;
   createdAt: number;
   attempted: boolean;
+  skipYtDlp?: boolean;
 };
 
 const fallbackContextTtlMs = 30 * 60 * 1000;
@@ -111,6 +112,12 @@ export class LavalinkService {
     await player.connect();
 
     const directUrl = isHttpUrl(query);
+    const ytdlpPrimaryAttempted = this.shouldUseYtDlpPrimary(query);
+    if (ytdlpPrimaryAttempted) {
+      const ytdlpResult = await this.tryQueueYtDlpPrimary(player, textChannelId, query, requester);
+      if (ytdlpResult) return ytdlpResult;
+    }
+
     const primarySource = directUrl ? undefined : this.config.searchSource;
     const searchQuery = directUrl
       ? { query }
@@ -131,7 +138,8 @@ export class LavalinkService {
         primarySource: directUrl ? 'youtube-url' : String(primarySource),
         fallbackSource: this.config.fallbackSearchSource ?? 'scsearch',
         textChannelId,
-        requester
+        requester,
+        skipYtDlp: ytdlpPrimaryAttempted
       });
     }
 
@@ -240,6 +248,7 @@ export class LavalinkService {
       `volume: ${player?.volume ?? 'n/a'}%`,
       `repeat: ${player ? fromLavalinkRepeatMode(player.repeatMode) : 'off'}`,
       `fallback: ${this.config.fallbackSearchSource ? `${this.config.searchSource}->${this.config.fallbackSearchSource}` : 'disabled'}`,
+      `play_order: ${this.ytdlpService?.enabled ? `yt-dlp-${this.ytdlpService.mode}->${this.config.searchSource}->${this.config.fallbackSearchSource ?? 'none'}` : `${this.config.searchSource}->${this.config.fallbackSearchSource ?? 'none'}`}`,
       ...(this.ytdlpService?.healthText() ?? [])
     ];
   }
@@ -254,6 +263,61 @@ export class LavalinkService {
       selfMute: false,
       volume: 80
     });
+  }
+
+
+  private shouldUseYtDlpPrimary(query: string): boolean {
+    if (!this.ytdlpService?.enabled) return false;
+    return !isHttpUrl(query) || isYoutubeUrl(query);
+  }
+
+  private async tryQueueYtDlpPrimary(
+    player: any,
+    textChannelId: string,
+    query: string,
+    requester: unknown
+  ): Promise<LavalinkPlayResult | undefined> {
+    try {
+      const { resolved, track, title } = await this.loadYtDlpTrack(player, query, requester);
+      this.registerFallbackContexts([track], {
+        originalQuery: query,
+        primarySource: `ytdlp-${resolved.mode}`,
+        fallbackSource: this.config.searchSource,
+        textChannelId,
+        requester,
+        skipYtDlp: true
+      });
+
+      await player.queue.add([track]);
+      if (!player.playing && !player.paused) {
+        await player.play();
+      }
+
+      this.logger.info({
+        guildId: player.guildId,
+        query,
+        ytdlpMode: resolved.mode,
+        videoId: resolved.videoId,
+        cachedPath: resolved.cachedPath,
+        title
+      }, 'queued yt-dlp primary track request');
+      return { title, added: 1 };
+    } catch (error) {
+      this.logger.warn({ err: error, guildId: player.guildId, query }, 'yt-dlp primary playback failed; falling back to lavalink search');
+      return undefined;
+    }
+  }
+
+  private async loadYtDlpTrack(player: any, query: string, requester: unknown): Promise<{ resolved: Awaited<ReturnType<YtDlpService['resolve']>>; track: any; title: string }> {
+    if (!this.ytdlpService?.enabled) throw new Error('yt-dlp is disabled');
+    const resolved = await this.ytdlpService.resolve(query);
+    const result = await player.search({ query: resolved.playUrl }, requester, false) as any;
+    const tracks = Array.isArray(result.tracks) ? result.tracks : [];
+    const track = tracks[0];
+    if (!track) throw new Error('Lavalink could not load yt-dlp media URL');
+    const loadedTitle = formatTrack(track);
+    const title = loadedTitle === 'Unknown Track' ? resolved.title : loadedTitle;
+    return { resolved, track, title };
   }
 
   private shouldHandlePlaybackFailureFrom(source: SearchPlatform): boolean {
@@ -310,9 +374,9 @@ export class LavalinkService {
     }
 
     this.fallbackInFlightGuilds.add(player.guildId);
-    let ytdlpAttempted = false;
+    let ytdlpAttempted = Boolean(context.skipYtDlp);
     try {
-      if (this.ytdlpService?.enabled) {
+      if (this.ytdlpService?.enabled && !context.skipYtDlp) {
         ytdlpAttempted = true;
         if (await this.tryYtDlpFallback(player, context, eventName)) return;
       }
@@ -326,17 +390,17 @@ export class LavalinkService {
   private async tryYtDlpFallback(player: any, context: PlaybackFallbackContext, eventName: 'trackError' | 'trackStuck'): Promise<boolean> {
     if (!this.ytdlpService?.enabled) return false;
     try {
-      const resolved = await this.ytdlpService.resolve(context.fallbackQuery || context.originalQuery);
-      const result = await player.search({ query: resolved.playUrl }, context.requester, false) as any;
-      const tracks = Array.isArray(result.tracks) ? result.tracks : [];
-      const fallbackTrack = tracks[0];
-      if (!fallbackTrack) {
-        throw new Error('Lavalink could not load yt-dlp fallback URL');
-      }
+      const { resolved, track: fallbackTrack, title } = await this.loadYtDlpTrack(player, context.fallbackQuery || context.originalQuery, context.requester);
 
+      this.registerFallbackContexts([fallbackTrack], {
+        originalQuery: context.originalQuery,
+        primarySource: `ytdlp-${resolved.mode}`,
+        fallbackSource: context.fallbackSource,
+        textChannelId: context.textChannelId,
+        requester: context.requester,
+        skipYtDlp: true
+      });
       await player.play({ clientTrack: fallbackTrack });
-      const loadedTitle = formatTrack(fallbackTrack);
-      const title = loadedTitle === 'Unknown Track' ? resolved.title : loadedTitle;
       this.logger.warn({
         guildId: player.guildId,
         originalQuery: context.originalQuery,
@@ -346,10 +410,10 @@ export class LavalinkService {
         cachedPath: resolved.cachedPath,
         title,
         eventName
-      }, 'youtube playback failed; switched to yt-dlp fallback');
+      }, 'playback failed; switched to yt-dlp fallback');
       await this.sendTextChannelMessage(
         context.textChannelId,
-        `YouTube 播放失败，已自动切到 yt-dlp ${resolved.mode === 'cache' ? '缓存' : '直链'}：**${escapeMarkdownLite(title)}**`
+        `播放失败，已自动切到 yt-dlp ${resolved.mode === 'cache' ? '缓存' : '直链'}：**${escapeMarkdownLite(title)}**`
       );
       return true;
     } catch (error) {
@@ -367,7 +431,7 @@ export class LavalinkService {
     if (!this.hasSearchSourceFallback(context)) {
       this.logger.warn({ guildId: player.guildId, originalQuery: context.originalQuery, ytdlpAttempted }, 'no secondary search source fallback configured');
       const prefix = ytdlpAttempted ? 'yt-dlp 直链也失败，且没有配置其他搜索源 fallback' : '没有配置其他搜索源 fallback';
-      await this.sendTextChannelMessage(context.textChannelId, `YouTube 播放失败，${prefix}：**${escapeMarkdownLite(context.originalQuery)}**`);
+      await this.sendTextChannelMessage(context.textChannelId, `播放失败，${prefix}：**${escapeMarkdownLite(context.originalQuery)}**`);
       return;
     }
 
@@ -377,11 +441,13 @@ export class LavalinkService {
       const fallbackTrack = tracks[0];
       if (!fallbackTrack) {
         this.logger.error({ guildId: player.guildId, originalQuery: context.originalQuery, fallbackQuery: context.fallbackQuery, fallbackSource: context.fallbackSource, ytdlpAttempted }, 'fallback search returned no tracks');
-        const prefix = ytdlpAttempted ? 'yt-dlp 直链也失败，SoundCloud 也没有找到可播放结果' : 'SoundCloud 也没有找到可播放结果';
-        await this.sendTextChannelMessage(context.textChannelId, `YouTube 播放失败，${prefix}：**${escapeMarkdownLite(context.originalQuery)}**`);
+        const targetLabel = searchSourceLabel(context.fallbackSource);
+        const prefix = ytdlpAttempted ? `yt-dlp 直链也失败，${targetLabel} 也没有找到可播放结果` : `${targetLabel} 也没有找到可播放结果`;
+        await this.sendTextChannelMessage(context.textChannelId, `播放失败，${prefix}：**${escapeMarkdownLite(context.originalQuery)}**`);
         return;
       }
 
+      this.registerNextFailureFallback(fallbackTrack, context);
       await player.play({ clientTrack: fallbackTrack });
       const title = formatTrack(fallbackTrack);
       this.logger.warn({
@@ -392,14 +458,39 @@ export class LavalinkService {
         ytdlpAttempted,
         title,
         eventName
-      }, 'youtube playback failed; switched to fallback source');
-      const prefix = ytdlpAttempted ? 'yt-dlp 直链失败后，已自动切到 SoundCloud' : '已自动切到 SoundCloud';
-      await this.sendTextChannelMessage(context.textChannelId, `YouTube 播放失败，${prefix}：**${escapeMarkdownLite(title)}**`);
+      }, 'playback failed; switched to fallback source');
+      const targetLabel = searchSourceLabel(context.fallbackSource);
+      const prefix = ytdlpAttempted ? `yt-dlp 直链失败后，已自动切到 ${targetLabel}` : `已自动切到 ${targetLabel}`;
+      await this.sendTextChannelMessage(context.textChannelId, `播放失败，${prefix}：**${escapeMarkdownLite(title)}**`);
     } catch (error) {
       this.logger.error({ err: error, guildId: player.guildId, originalQuery: context.originalQuery, fallbackSource: context.fallbackSource, ytdlpAttempted }, 'fallback playback failed');
-      const prefix = ytdlpAttempted ? 'yt-dlp 直链和 SoundCloud 自动切换都失败了' : '自动切换 SoundCloud 也失败了';
-      await this.sendTextChannelMessage(context.textChannelId, `YouTube 播放失败，${prefix}：**${escapeMarkdownLite(context.originalQuery)}**`);
+      const targetLabel = searchSourceLabel(context.fallbackSource);
+      const prefix = ytdlpAttempted ? `yt-dlp 直链和 ${targetLabel} 自动切换都失败了` : `自动切换 ${targetLabel} 也失败了`;
+      await this.sendTextChannelMessage(context.textChannelId, `播放失败，${prefix}：**${escapeMarkdownLite(context.originalQuery)}**`);
     }
+  }
+
+  private registerNextFailureFallback(track: any, context: PlaybackFallbackContext): void {
+    if (!this.shouldHandlePlaybackFailureFrom(context.fallbackSource)) return;
+    const fallbackSearchSource = this.config.fallbackSearchSource;
+    if (!fallbackSearchSource) return;
+    const currentSource = String(context.fallbackSource).toLowerCase();
+    const nextSource = String(fallbackSearchSource).toLowerCase();
+    if (nextSource === currentSource) return;
+
+    const key = trackKey(track);
+    if (!key) return;
+    this.fallbackByTrackKey.set(key, {
+      originalQuery: context.originalQuery,
+      primarySource: String(context.fallbackSource),
+      fallbackSource: fallbackSearchSource,
+      textChannelId: context.textChannelId,
+      requester: context.requester,
+      fallbackQuery: buildFallbackQuery(track, context.originalQuery),
+      createdAt: Date.now(),
+      attempted: false,
+      skipYtDlp: true
+    });
   }
 
   private async sendTextChannelMessage(textChannelId: string, message: string): Promise<void> {
@@ -453,6 +544,14 @@ function formatTrack(track: Track | any): string {
   const title = info.title ?? 'Unknown Track';
   const author = info.author;
   return author ? `${author} - ${title}` : title;
+}
+
+function searchSourceLabel(source: SearchPlatform): string {
+  const normalized = String(source).toLowerCase();
+  if (normalized.startsWith('ytm')) return 'YouTube Music';
+  if (normalized.startsWith('yt')) return 'YouTube';
+  if (normalized.startsWith('sc') || normalized.includes('soundcloud')) return 'SoundCloud';
+  return String(source);
 }
 
 function isHttpUrl(value: string): boolean {

@@ -177,18 +177,18 @@
 - `/guess start|reveal|stop` 复用 DJ role 权限规则
 
 
-## Phase 8：yt-dlp fallback ✅ 已完成
+## Phase 8：yt-dlp 直链主播放路径 ✅ 已完成
 
-目标：当 Lavalink YouTube Source 能搜索但被 YouTube 风控拦截播放时，用 yt-dlp 兜底解析。
+目标：把 yt-dlp 直链解析作为 `/play` 默认主播放路径，降低 Lavalink YouTube Source 被风控时的影响。
 
 范围：
 
 - 新增 `YtDlpService`
-- 默认 `YTDLP_FALLBACK_MODE=direct`，用 `yt-dlp -g` 解析临时媒体直链
+- 默认 `YTDLP_FALLBACK_MODE=direct`，先用 `yt-dlp -g` 解析临时媒体直链
 - 保留 `YTDLP_FALLBACK_MODE=cache`，可下载到 `runtime/cache` 后通过内置 HTTP cache server 交给 Lavalink 播放
 - Docker runtime 镜像内安装 `yt-dlp` 与 `ffmpeg`
-- YouTube 播放失败时 fallback 顺序：yt-dlp 直链/缓存 → SoundCloud
-- `/health` 显示 yt-dlp fallback 状态
+- 默认播放顺序：yt-dlp 直链/缓存 → `ytmsearch` → `scsearch`
+- `/health` 显示 yt-dlp 状态和 `play_order`
 
 当前说明：
 

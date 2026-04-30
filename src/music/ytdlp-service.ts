@@ -66,6 +66,10 @@ export class YtDlpService {
     return this.config.enabled;
   }
 
+  get mode(): YtDlpFallbackMode {
+    return this.config.mode;
+  }
+
   async start(): Promise<void> {
     if (!this.config.enabled) return;
     await mkdir(this.config.cacheDir, { recursive: true });

@@ -1,13 +1,13 @@
 # Discord Music Bot
 
-一个全新的 Discord 点歌 Bot 仓库。当前处于 **Phase 8：yt-dlp 直链 fallback**。
+一个全新的 Discord 点歌 Bot 仓库。当前处于 **Phase 8：yt-dlp 直链主播放路径**。
 
 ## 当前能力
 
 - 注册 Discord Slash Commands
 - `/ping`
 - `/play query:<链接或关键词>`：加入用户所在语音频道并播放
-  - `AUDIO_BACKEND=lavalink`：通过 Lavalink 搜索/播放，默认 `ytmsearch`；YouTube 播放失败时先自动 fallback 到 **yt-dlp 直链**，再尝试 `scsearch`
+  - `AUDIO_BACKEND=lavalink`：默认先用 **yt-dlp 直链**解析关键词或 YouTube 链接；失败后再走 Lavalink `ytmsearch`，最后用 `scsearch` 兜底
   - `AUDIO_BACKEND=builtin`：使用内置 `@discordjs/voice` 播放直接音频 URL 或 iTunes 预览
 - `/search query:<关键词>`：搜索 Apple Music/iTunes 预览，返回 Select Menu，点击后加入队列播放
 - `/queue`、`/nowplaying`
@@ -236,26 +236,27 @@ docker compose restart lavalink discord-music-bot
 如果仍失败，优先看 Lavalink 日志中的 YouTube 报错。常见原因是 YouTube 风控、区域限制、插件版本需要更新，或该账号/网络被 YouTube 限制。
 
 
-### YouTube 失败自动 fallback
+### 默认播放顺序：yt-dlp 直链优先
 
 默认配置：
 
 ```env
-LAVALINK_SEARCH_SOURCE=ytmsearch
 YTDLP_ENABLED=true
 YTDLP_FALLBACK_MODE=direct
+LAVALINK_SEARCH_SOURCE=ytmsearch
 LAVALINK_FALLBACK_SEARCH_SOURCE=scsearch
 ```
 
-含义：`/play` 优先使用 YouTube Music 搜索；如果 YouTube 搜到了但播放流被 `This video requires login` / `Sign in to confirm you’re not a bot` 拦截，Bot 会按顺序自动尝试：
+含义：`/play` 收到关键词或 YouTube 链接时，Bot 会按顺序尝试：
 
-1. **yt-dlp 直链 fallback**：执行 `yt-dlp -g -f "$YTDLP_FORMAT" "ytsearch1:<歌名>"` 解析临时媒体直链，再交给 Lavalink 的 HTTP source 播放。
-2. **SoundCloud fallback**：如果 yt-dlp 也失败，再搜索 `LAVALINK_FALLBACK_SEARCH_SOURCE=scsearch`。
+1. **yt-dlp 直链主路径**：执行 `yt-dlp -g -f "$YTDLP_FORMAT" "ytsearch1:<歌名>"` 解析临时媒体直链，再交给 Lavalink 的 HTTP source 播放。
+2. **YouTube Music / Lavalink 搜索兜底**：如果 yt-dlp 解析失败，或 yt-dlp 直链播放失败，再走 `LAVALINK_SEARCH_SOURCE=ytmsearch`。
+3. **SoundCloud 兜底**：如果 YouTube Music 仍被风控或不可播放，再走 `LAVALINK_FALLBACK_SEARCH_SOURCE=scsearch`。
 
-成功时文字频道会看到类似提示：
+`/health` 会显示类似：
 
 ```text
-YouTube 播放失败，已自动切到 yt-dlp 直链：...
+play_order: yt-dlp-direct->ytmsearch->scsearch
 ```
 
 如果要改成下载缓存后播放，把模式改为：
@@ -272,17 +273,13 @@ YTDLP_CACHE_PUBLIC_BASE_URL=http://discord-music-bot:3000
 
 你的服务器硬盘只有 25GB，建议先保持默认 `direct`。如果后面启用 `cache`，可以通过 `YTDLP_CACHE_MAX_MB` 和 `YTDLP_CACHE_TTL_HOURS` 控制清理策略。
 
-如果你只想硬用 YouTube，不想 SoundCloud 兜底，可以把 `LAVALINK_FALLBACK_SEARCH_SOURCE` 改成与主搜索源相同，例如：
-
-```env
-LAVALINK_FALLBACK_SEARCH_SOURCE=ytmsearch
-```
-
-此时仍会先尝试 yt-dlp 直链；如果也想禁用 yt-dlp，设置：
+如果想临时关闭 yt-dlp 主路径，设置：
 
 ```env
 YTDLP_ENABLED=false
 ```
+
+关闭后 `/play` 会回到 Lavalink `ytmsearch -> scsearch` 顺序。
 
 ## 路线图
 
