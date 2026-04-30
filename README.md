@@ -96,8 +96,10 @@ YTDLP_CACHE_HTTP_PORT=3000
 YTDLP_CACHE_MAX_MB=2048
 YTDLP_CACHE_TTL_HOURS=72
 # YTDLP_CACHE_HTTP_TOKEN=
-# YTDLP_COOKIES_PATH=/app/secrets/youtube-cookies.txt
+# YTDLP_COOKIES_PATH=/app/runtime/youtube-cookies.txt
+YTDLP_JS_RUNTIMES=node
 # YTDLP_EXTRACTOR_ARGS=youtube:player_client=web_music
+# YTDLP_REMOTE_COMPONENTS=ejs:github
 
 ITUNES_COUNTRY=us
 STORAGE_PATH=runtime/bot.sqlite
@@ -280,6 +282,35 @@ YTDLP_ENABLED=false
 ```
 
 关闭后 `/play` 会回到 Lavalink `ytmsearch -> scsearch` 顺序。
+
+
+### yt-dlp EJS / YouTube 签名解析
+
+如果日志里出现：
+
+```text
+Signature solving failed
+n challenge solving failed
+Requested format is not available
+```
+
+这通常表示 yt-dlp 缺少 YouTube JavaScript challenge solver。Docker 镜像已经安装 `yt-dlp[default]`，并默认设置：
+
+```env
+YTDLP_JS_RUNTIMES=node
+```
+
+如果你使用旧镜像，需要重新构建：
+
+```bash
+docker compose up -d --build
+```
+
+如果依旧失败，可以临时允许 yt-dlp 从 GitHub 拉取 EJS 组件：
+
+```env
+YTDLP_REMOTE_COMPONENTS=ejs:github
+```
 
 ## 路线图
 

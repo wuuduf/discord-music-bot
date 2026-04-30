@@ -42,6 +42,8 @@ const envSchema = z.object({
   YTDLP_CACHE_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(72),
   YTDLP_COOKIES_PATH: optionalStringFromEnv,
   YTDLP_EXTRACTOR_ARGS: optionalStringFromEnv,
+  YTDLP_JS_RUNTIMES: optionalStringFromEnv.default('node'),
+  YTDLP_REMOTE_COMPONENTS: optionalStringFromEnv,
   ITUNES_COUNTRY: z.string().min(2).max(2).default('us'),
   STORAGE_PATH: z.string().min(1).default('runtime/bot.sqlite'),
   MAX_QUEUE_SIZE: z.coerce.number().int().min(1).max(500).default(50),

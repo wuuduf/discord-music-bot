@@ -22,6 +22,8 @@ export type YtDlpServiceConfig = {
   cacheTtlHours: number;
   cookiesPath?: string;
   extractorArgs?: string;
+  jsRuntimes?: string;
+  remoteComponents?: string;
 };
 
 export type YtDlpResolveResult = {
@@ -99,7 +101,8 @@ export class YtDlpService {
     const lines = [
       `ytdlp: enabled`,
       `ytdlp_mode: ${this.config.mode}`,
-      `ytdlp_format: ${this.config.format}`
+      `ytdlp_format: ${this.config.format}`,
+      `ytdlp_js_runtimes: ${this.config.jsRuntimes ?? 'default'}`
     ];
     if (this.config.mode === 'cache') {
       lines.push(
@@ -224,6 +227,12 @@ export class YtDlpService {
     }
     if (this.config.extractorArgs) {
       args.push('--extractor-args', this.config.extractorArgs);
+    }
+    if (this.config.jsRuntimes) {
+      args.push('--js-runtimes', this.config.jsRuntimes);
+    }
+    if (this.config.remoteComponents) {
+      args.push('--remote-components', this.config.remoteComponents);
     }
     return args;
   }
