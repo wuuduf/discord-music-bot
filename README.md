@@ -100,6 +100,9 @@ YTDLP_CACHE_TTL_HOURS=72
 YTDLP_JS_RUNTIMES=node
 # YTDLP_EXTRACTOR_ARGS=youtube:player_client=web_music
 # YTDLP_REMOTE_COMPONENTS=ejs:github
+YTDLP_DIRECT_CACHE_ENABLED=true
+YTDLP_DIRECT_CACHE_TTL_MS=600000
+YTDLP_DIRECT_CACHE_MAX_ITEMS=100
 
 ITUNES_COUNTRY=us
 STORAGE_PATH=runtime/bot.sqlite
@@ -274,6 +277,16 @@ YTDLP_CACHE_PUBLIC_BASE_URL=http://discord-music-bot:3000
 ```
 
 你的服务器硬盘只有 25GB，建议先保持默认 `direct`。如果后面启用 `cache`，可以通过 `YTDLP_CACHE_MAX_MB` 和 `YTDLP_CACHE_TTL_HOURS` 控制清理策略。
+
+直链模式不会下载文件，但默认会把 `关键词 -> 标题 + 临时直链` 缓存在内存里 10 分钟：
+
+```env
+YTDLP_DIRECT_CACHE_ENABLED=true
+YTDLP_DIRECT_CACHE_TTL_MS=600000
+YTDLP_DIRECT_CACHE_MAX_ITEMS=100
+```
+
+同一首歌短时间内再次点播会跳过 yt-dlp 解析，明显更快。
 
 如果想临时关闭 yt-dlp 主路径，设置：
 

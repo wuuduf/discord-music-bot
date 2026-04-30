@@ -24,6 +24,9 @@ export type YtDlpServiceConfig = {
   extractorArgs?: string;
   jsRuntimes?: string;
   remoteComponents?: string;
+  directCacheEnabled: boolean;
+  directCacheTtlMs: number;
+  directCacheMaxItems: number;
 };
 
 export type YtDlpResolveResult = {
@@ -58,6 +61,7 @@ const sidecarExtension = '.json';
 
 export class YtDlpService {
   private server?: Server;
+  private readonly directCache = new Map<string, { result: YtDlpResolveResult; expiresAt: number; createdAt: number }>();
 
   constructor(
     private readonly config: YtDlpServiceConfig,
@@ -102,7 +106,8 @@ export class YtDlpService {
       `ytdlp: enabled`,
       `ytdlp_mode: ${this.config.mode}`,
       `ytdlp_format: ${this.config.format}`,
-      `ytdlp_js_runtimes: ${this.config.jsRuntimes ?? 'default'}`
+      `ytdlp_js_runtimes: ${this.config.jsRuntimes ?? 'default'}`,
+      `ytdlp_direct_cache: ${this.config.directCacheEnabled ? `${this.config.directCacheTtlMs}ms/${this.config.directCacheMaxItems}` : 'disabled'}`
     ];
     if (this.config.mode === 'cache') {
       lines.push(
@@ -115,6 +120,13 @@ export class YtDlpService {
   }
 
   private async resolveDirect(query: string): Promise<YtDlpResolveResult> {
+    const cacheKey = this.directCacheKey(query);
+    const cached = this.getDirectCache(cacheKey);
+    if (cached) {
+      this.logger.debug({ query, title: cached.title, videoId: cached.videoId }, 'yt-dlp direct cache hit');
+      return cached;
+    }
+
     const target = buildSearchTarget(query);
     const { stdout } = await this.runYtDlp([
       ...this.baseArgs(),
@@ -131,12 +143,52 @@ export class YtDlpService {
 
     const title = lines.find((line, index) => index !== playUrlIndex && !isLikelyYoutubeId(line)) ?? `yt-dlp: ${query}`;
     const videoId = lines.find((line, index) => index !== playUrlIndex && isLikelyYoutubeId(line));
-    return {
+    const result = {
       title,
       playUrl,
-      mode: 'direct',
+      mode: 'direct' as const,
       videoId
     };
+    this.setDirectCache(cacheKey, result);
+    return result;
+  }
+
+  private directCacheKey(query: string): string {
+    return `${this.config.format}\0${this.config.cookiesPath ?? ''}\0${this.config.extractorArgs ?? ''}\0${this.config.jsRuntimes ?? ''}\0${this.config.remoteComponents ?? ''}\0${buildSearchTarget(query).trim().toLowerCase()}`;
+  }
+
+  private getDirectCache(key: string): YtDlpResolveResult | undefined {
+    if (!this.config.directCacheEnabled || this.config.directCacheTtlMs <= 0) return undefined;
+    const entry = this.directCache.get(key);
+    if (!entry) return undefined;
+    if (entry.expiresAt <= Date.now()) {
+      this.directCache.delete(key);
+      return undefined;
+    }
+    return entry.result;
+  }
+
+  private setDirectCache(key: string, result: YtDlpResolveResult): void {
+    if (!this.config.directCacheEnabled || this.config.directCacheTtlMs <= 0) return;
+    this.directCache.set(key, {
+      result,
+      expiresAt: Date.now() + this.config.directCacheTtlMs,
+      createdAt: Date.now()
+    });
+    this.trimDirectCache();
+  }
+
+  private trimDirectCache(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.directCache) {
+      if (entry.expiresAt <= now) this.directCache.delete(key);
+    }
+    const maxItems = Math.max(1, this.config.directCacheMaxItems);
+    if (this.directCache.size <= maxItems) return;
+    const overflow = [...this.directCache.entries()]
+      .sort(([, a], [, b]) => a.createdAt - b.createdAt)
+      .slice(0, this.directCache.size - maxItems);
+    for (const [key] of overflow) this.directCache.delete(key);
   }
 
   private async resolveCached(query: string): Promise<YtDlpResolveResult> {

@@ -51,7 +51,10 @@ const ytdlpService = new YtDlpService({
   cookiesPath: env.YTDLP_COOKIES_PATH,
   extractorArgs: env.YTDLP_EXTRACTOR_ARGS,
   jsRuntimes: env.YTDLP_JS_RUNTIMES,
-  remoteComponents: env.YTDLP_REMOTE_COMPONENTS
+  remoteComponents: env.YTDLP_REMOTE_COMPONENTS,
+  directCacheEnabled: env.YTDLP_DIRECT_CACHE_ENABLED,
+  directCacheTtlMs: env.YTDLP_DIRECT_CACHE_TTL_MS,
+  directCacheMaxItems: env.YTDLP_DIRECT_CACHE_MAX_ITEMS
 }, logger);
 const lavalinkService = new LavalinkService(client, {
   enabled: env.AUDIO_BACKEND === 'lavalink',
