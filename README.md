@@ -1,13 +1,13 @@
 # Discord Music Bot
 
-一个全新的 Discord 点歌 Bot 仓库。当前处于 **Phase 7：Lavalink 完整音源后端**。
+一个全新的 Discord 点歌 Bot 仓库。当前处于 **Phase 8：yt-dlp 直链 fallback**。
 
 ## 当前能力
 
 - 注册 Discord Slash Commands
 - `/ping`
 - `/play query:<链接或关键词>`：加入用户所在语音频道并播放
-  - `AUDIO_BACKEND=lavalink`：通过 Lavalink 搜索/播放，默认 `ytmsearch`，YouTube 播放失败时自动 fallback 到 `scsearch`
+  - `AUDIO_BACKEND=lavalink`：通过 Lavalink 搜索/播放，默认 `ytmsearch`；YouTube 播放失败时先自动 fallback 到 **yt-dlp 直链**，再尝试 `scsearch`
   - `AUDIO_BACKEND=builtin`：使用内置 `@discordjs/voice` 播放直接音频 URL 或 iTunes 预览
 - `/search query:<关键词>`：搜索 Apple Music/iTunes 预览，返回 Select Menu，点击后加入队列播放
 - `/queue`、`/nowplaying`
@@ -83,6 +83,21 @@ LAVALINK_PASSWORD=youshallnotpass
 LAVALINK_SECURE=false
 LAVALINK_SEARCH_SOURCE=ytmsearch
 LAVALINK_FALLBACK_SEARCH_SOURCE=scsearch
+
+YTDLP_ENABLED=true
+YTDLP_FALLBACK_MODE=direct
+YTDLP_BIN=yt-dlp
+YTDLP_FORMAT=bestaudio[ext=m4a]/bestaudio/best
+YTDLP_TIMEOUT_MS=180000
+YTDLP_CACHE_DIR=runtime/cache
+YTDLP_CACHE_PUBLIC_BASE_URL=http://discord-music-bot:3000
+YTDLP_CACHE_HTTP_HOST=0.0.0.0
+YTDLP_CACHE_HTTP_PORT=3000
+YTDLP_CACHE_MAX_MB=2048
+YTDLP_CACHE_TTL_HOURS=72
+# YTDLP_CACHE_HTTP_TOKEN=
+# YTDLP_COOKIES_PATH=/app/secrets/youtube-cookies.txt
+# YTDLP_EXTRACTOR_ARGS=youtube:player_client=web_music
 
 ITUNES_COUNTRY=us
 STORAGE_PATH=runtime/bot.sqlite
@@ -227,19 +242,46 @@ docker compose restart lavalink discord-music-bot
 
 ```env
 LAVALINK_SEARCH_SOURCE=ytmsearch
+YTDLP_ENABLED=true
+YTDLP_FALLBACK_MODE=direct
 LAVALINK_FALLBACK_SEARCH_SOURCE=scsearch
 ```
 
-含义：`/play` 优先使用 YouTube Music；如果 YouTube 搜到了但播放流被 `This video requires login` / `Sign in to confirm you’re not a bot` 拦截，Bot 会自动搜索 SoundCloud，并在文字频道提示：
+含义：`/play` 优先使用 YouTube Music 搜索；如果 YouTube 搜到了但播放流被 `This video requires login` / `Sign in to confirm you’re not a bot` 拦截，Bot 会按顺序自动尝试：
+
+1. **yt-dlp 直链 fallback**：执行 `yt-dlp -g -f "$YTDLP_FORMAT" "ytsearch1:<歌名>"` 解析临时媒体直链，再交给 Lavalink 的 HTTP source 播放。
+2. **SoundCloud fallback**：如果 yt-dlp 也失败，再搜索 `LAVALINK_FALLBACK_SEARCH_SOURCE=scsearch`。
+
+成功时文字频道会看到类似提示：
 
 ```text
-YouTube 播放失败，已自动切到 SoundCloud：...
+YouTube 播放失败，已自动切到 yt-dlp 直链：...
 ```
 
-如果你只想硬用 YouTube，不想 fallback，可以把 `LAVALINK_FALLBACK_SEARCH_SOURCE` 改成与主搜索源相同，例如：
+如果要改成下载缓存后播放，把模式改为：
+
+```env
+YTDLP_FALLBACK_MODE=cache
+```
+
+缓存模式会把文件放到 `YTDLP_CACHE_DIR`，并在 Bot 容器内启动一个只给 Lavalink 访问的 HTTP cache server。默认 Compose 网络内地址是：
+
+```env
+YTDLP_CACHE_PUBLIC_BASE_URL=http://discord-music-bot:3000
+```
+
+你的服务器硬盘只有 25GB，建议先保持默认 `direct`。如果后面启用 `cache`，可以通过 `YTDLP_CACHE_MAX_MB` 和 `YTDLP_CACHE_TTL_HOURS` 控制清理策略。
+
+如果你只想硬用 YouTube，不想 SoundCloud 兜底，可以把 `LAVALINK_FALLBACK_SEARCH_SOURCE` 改成与主搜索源相同，例如：
 
 ```env
 LAVALINK_FALLBACK_SEARCH_SOURCE=ytmsearch
+```
+
+此时仍会先尝试 yt-dlp 直链；如果也想禁用 yt-dlp，设置：
+
+```env
+YTDLP_ENABLED=false
 ```
 
 ## 路线图

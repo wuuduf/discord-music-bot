@@ -5,6 +5,7 @@ import { InteractionRouter } from './discord/interaction-router.js';
 import { GuessGameManager } from './music/guess-game-manager.js';
 import { ITunesResolver } from './music/itunes-resolver.js';
 import { LavalinkService } from './music/lavalink-service.js';
+import { YtDlpService } from './music/ytdlp-service.js';
 import { PlayerManager } from './music/player-manager.js';
 import { QueueManager } from './music/queue-manager.js';
 import { SqliteStorage } from './storage/sqlite-storage.js';
@@ -34,6 +35,22 @@ const queueManager = new QueueManager(storage, env.MAX_QUEUE_SIZE);
 const playerManager = new PlayerManager(queueManager, logger);
 const guessGameManager = new GuessGameManager();
 const sourceResolver = new ITunesResolver(env.ITUNES_COUNTRY, logger, storage);
+const ytdlpService = new YtDlpService({
+  enabled: env.YTDLP_ENABLED && env.AUDIO_BACKEND === 'lavalink',
+  mode: env.YTDLP_FALLBACK_MODE,
+  binary: env.YTDLP_BIN,
+  format: env.YTDLP_FORMAT,
+  timeoutMs: env.YTDLP_TIMEOUT_MS,
+  cacheDir: env.YTDLP_CACHE_DIR,
+  cachePublicBaseUrl: env.YTDLP_CACHE_PUBLIC_BASE_URL,
+  cacheHttpHost: env.YTDLP_CACHE_HTTP_HOST,
+  cacheHttpPort: env.YTDLP_CACHE_HTTP_PORT,
+  cacheHttpToken: env.YTDLP_CACHE_HTTP_TOKEN,
+  cacheMaxMb: env.YTDLP_CACHE_MAX_MB,
+  cacheTtlHours: env.YTDLP_CACHE_TTL_HOURS,
+  cookiesPath: env.YTDLP_COOKIES_PATH,
+  extractorArgs: env.YTDLP_EXTRACTOR_ARGS
+}, logger);
 const lavalinkService = new LavalinkService(client, {
   enabled: env.AUDIO_BACKEND === 'lavalink',
   host: env.LAVALINK_HOST,
@@ -42,10 +59,15 @@ const lavalinkService = new LavalinkService(client, {
   secure: env.LAVALINK_SECURE,
   searchSource: env.LAVALINK_SEARCH_SOURCE as SearchPlatform,
   fallbackSearchSource: env.LAVALINK_FALLBACK_SEARCH_SOURCE as SearchPlatform
-}, logger);
+}, logger, ytdlpService);
 const router = new InteractionRouter(queueManager, playerManager, guessGameManager, sourceResolver, logger, {
   userCooldownMs: env.USER_COOLDOWN_MS
 }, lavalinkService);
+
+await ytdlpService.start().catch(error => {
+  logger.error({ err: error }, 'failed to start yt-dlp fallback service');
+  throw error;
+});
 
 client.once(Events.ClientReady, async readyClient => {
   logger.info({ tag: readyClient.user.tag, audioBackend: env.AUDIO_BACKEND }, 'discord bot ready');
@@ -78,18 +100,26 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-process.on('SIGINT', () => {
-  logger.info('received SIGINT, destroying discord client');
+let shuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ signal }, 'shutting down discord bot');
   client.destroy();
+  await ytdlpService.stop().catch(error => {
+    logger.warn({ err: error }, 'failed to stop yt-dlp fallback service');
+  });
   storage.close();
   process.exit(0);
+}
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
 });
 
 process.on('SIGTERM', () => {
-  logger.info('received SIGTERM, destroying discord client');
-  client.destroy();
-  storage.close();
-  process.exit(0);
+  void shutdown('SIGTERM');
 });
 
 await client.login(env.DISCORD_TOKEN);

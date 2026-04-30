@@ -175,3 +175,22 @@
 - 已新增 `/guess hint`，按次数逐步揭示歌名/歌手掩码
 - 已新增 `/guess status`、`/guess reveal`、`/guess stop`
 - `/guess start|reveal|stop` 复用 DJ role 权限规则
+
+
+## Phase 8：yt-dlp fallback ✅ 已完成
+
+目标：当 Lavalink YouTube Source 能搜索但被 YouTube 风控拦截播放时，用 yt-dlp 兜底解析。
+
+范围：
+
+- 新增 `YtDlpService`
+- 默认 `YTDLP_FALLBACK_MODE=direct`，用 `yt-dlp -g` 解析临时媒体直链
+- 保留 `YTDLP_FALLBACK_MODE=cache`，可下载到 `runtime/cache` 后通过内置 HTTP cache server 交给 Lavalink 播放
+- Docker runtime 镜像内安装 `yt-dlp` 与 `ffmpeg`
+- YouTube 播放失败时 fallback 顺序：yt-dlp 直链/缓存 → SoundCloud
+- `/health` 显示 yt-dlp fallback 状态
+
+当前说明：
+
+- 默认推荐直链模式，少占磁盘，适合 25GB 小硬盘服务器
+- 缓存模式需要关注 `YTDLP_CACHE_MAX_MB` 与 `YTDLP_CACHE_TTL_HOURS`
